@@ -8,6 +8,8 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
+  derive-tf-versions:
+    uses: ./.github/workflows/derive-tf-version.yaml
   get-metadata:
     runs-on: ubuntu-latest
     outputs:
@@ -35,13 +37,14 @@ jobs:
     uses: ./.github/workflows/check-markdown-format.yaml
   check-terraform-format:
     uses: ./.github/workflows/check-terraform-format.yaml
-  # TODO restore when we have stacks to check post merge
-  # validate-terraform:
-  #   name: Validate terraform code
-  #   uses: ./.github/workflows/validate-terraform.yaml
-  #   with:
-  #     ENV: dev
-  #   secrets: inherit
+  validate-terraform:
+    name: Validate terraform code
+    uses: ./.github/workflows/validate-terraform.yaml
+    needs: derive-tf-versions
+    with:
+      ENV: dev
+      tf_vers: ${{needs.derive-tf-versions.outputs.maxVersion}}
+    secrets: inherit
   check-python-black-format:
       uses: ./.github/workflows/check-python-black-format.yaml
   check-python-flake-rules:
