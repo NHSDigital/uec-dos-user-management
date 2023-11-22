@@ -60,6 +60,7 @@ jobs:
     secrets: inherit
 
   build-and-deploy-application-code:
+    name: Deploy application code
     runs-on: ubuntu-latest
     environment: test
     permissions:
