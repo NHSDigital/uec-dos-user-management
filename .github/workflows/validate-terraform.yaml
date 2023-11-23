@@ -44,4 +44,4 @@ jobs:
           export ACTION=validate
           export STACK=${{ matrix.stack }}
           export ACCOUNT_TYPE=${{ vars.ACCOUNT_TYPE }}
-          /bin/bash ./scripts/infra-deploy.sh
+          /bin/bash ./scripts/action-infra-stack.sh
