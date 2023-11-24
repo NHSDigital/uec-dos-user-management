@@ -1,26 +1,22 @@
-name: CI/CD Pipeline
+name: Pipeline Deployment Application Development Environment
 
 on:
   push:
-  pull_request:
     branches:
       - main
-    types: [opened, synchronize, reopened]
+      - 'task/*'
 
 jobs:
   derive-tf-versions:
     name: Derive terraform version
     uses: ./.github/workflows/derive-tf-version.yaml
   get-metadata:
-    name: Get meta data
+    name: Get metadata
     runs-on: ubuntu-latest
     outputs:
       build_datetime: ${{ steps.metadata.outputs.build_datetime }}
       build_timestamp: ${{ steps.metadata.outputs.build_timestamp }}
       build_epoch: ${{ steps.metadata.outputs.build_epoch }}
-      nodejs_version: ${{ steps.metadata.outputs.nodejs_version }}
-      python_version: ${{ steps.metadata.outputs.python_version }}
-      terraform_version: ${{ steps.metadata.outputs.terraform_version }}
     steps:
       - id: metadata
         run: |
@@ -28,9 +24,12 @@ jobs:
           echo "build_datetime=$datetime" >> $GITHUB_OUTPUT
           echo "build_timestamp=$(date --date=$datetime -u +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
           echo "build_epoch=$(date --date=$datetime -u +'%s')" >> $GITHUB_OUTPUT
-          echo "nodejs_version=$(grep nodejs .tool-versions | cut -f2 -d' ')" >> $GITHUB_OUTPUT
-          echo "python_version=$(grep python .tool-versions | cut -f2 -d' ')" >> $GITHUB_OUTPUT
-          echo "terraform_version=$(grep terraform .tool-versions | cut -f2 -d' ')" >> $GITHUB_OUTPUT
+          echo "triggering action: ${{ github.event_name }}"
+          echo "ref type: ${{ github.ref_type }}"
+          echo "triggering reference: ${{ github.ref_name }}"
+          echo "github event ref: ${{ github.event.ref }}"
+          echo "username of user triggering the workflow: ${{ github.actor }}"
+          echo "user that triggered the event: ${{ github.event.sender }}"
   scan-secrets:
     name: Scan code for secrets
     uses: ./.github/workflows/scan-secrets.yaml
@@ -60,11 +59,7 @@ jobs:
   cloc-repository:
     name: Count lines of code
     uses: ./.github/workflows/cloc-repository.yaml
-  scan-dependencies:
-    name: Scan dependencies
-    uses: ./.github/workflows/scan-dependencies.yaml
-  cicd-pipeline-test:
-    runs-on: ubuntu-latest
+  unit-tests:
     needs:
       [
         get-metadata,
@@ -75,20 +70,54 @@ jobs:
         check-python-black-format,
         check-python-flake-rules,
         cloc-repository,
-        scan-dependencies,
       ]
-    timeout-minutes: 10
+    name: Run unit test
+    uses: ./.github/workflows/unit-test.yaml
+    with:
+      github_environment: dev
+    secrets: inherit
+  deploy-application-infrastructure:
+    name: Deploy application infrastructure
+    needs:
+      [
+        unit-tests,
+        validate-terraform,
+        derive-tf-versions,
+      ]
+    uses: ./.github/workflows/action-infrastructure-stack.yaml
+    with:
+      github_environment: dev
+      stack: application
+      action: plan
+      tf_vers: ${{needs.derive-tf-versions.outputs.maxVersion}}
+    secrets: inherit
+  build-and-deploy-application-code:
+    name: Deploy application code
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    needs:
+      [
+        deploy-application-infrastructure,
+      ]
+    strategy:
+      matrix:
+        service-name:
+          - tbd
     steps:
-      - uses: actions/checkout@v4
-      - name: List Variables
-        run: |
-          export BUILD_DATETIME="${{ needs.get-metadata.outputs.build_datetime }}"
-          export BUILD_TIMESTAMP="${{ needs.get-metadata.outputs.build_timestamp }}"
-          export BUILD_EPOCH="${{ needs.get-metadata.outputs.build_epoch }}"
-          export NODEJS_VERSION="${{ needs.get-metadata.outputs.nodejs_version }}"
-          export PYTHON_VERSION="${{ needs.get-metadata.outputs.python_version }}"
-          export TERRAFORM_VERSION="${{ needs.get-metadata.outputs.terraform_version }}"
-          make list-variables
-      # - name: Run Tests ...
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2.2.0
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.ACCOUNT_ID }}:role/uec-dos-user-management-github-runner
+          role-session-name: github-pipeline-session
+          aws-region: ${{ vars.AWS_REGION }}
+# TODO restore when application code ready
+      # - name: Build and deploy application code
       #   run: |
-      #     ?
+      #     export SERVICE_NAME=${{ matrix.service-name }}
+      #     /bin/bash ./scripts/app-build-deploy.sh
